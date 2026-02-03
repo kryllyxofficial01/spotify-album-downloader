@@ -24,7 +24,7 @@ with open(data, encoding="utf-8") as playlist1_file:
     playlist_data = next((item for item in playlists_full_data if item["name"] == playlist_name), None)
 
     if playlist_data:
-        track_count = 0
+        album_count = 0
 
         for track in playlist_data["items"]:
             if track["track"]:
@@ -33,14 +33,20 @@ with open(data, encoding="utf-8") as playlist1_file:
                 track_album = track["track"]["albumName"]
                 track_artist = track["track"]["artistName"]
 
-                rows.append({
+                album_entry = {
                     "album": track_album,
                     "artist": track_artist
-                })
+                }
 
-                track_count += 1
+                if album_entry not in rows:
+                    rows.append({
+                        "album": track_album,
+                        "artist": track_artist
+                    })
 
-        print(f"\nLoaded {track_count} tracks")
+                    album_count += 1
+
+        print(f"\nLoaded {album_count} albums")
 
     else:
         print(f"No playlist found with the name '{playlist_name}'")
