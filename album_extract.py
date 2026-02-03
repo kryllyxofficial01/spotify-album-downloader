@@ -1,46 +1,54 @@
+import sys
+
 import json
 import csv
 
 from pathlib import Path
 
-data_directory = Path("") # todo: get the path to the extracted zip
+if len(sys.argv) < 3:
+    print("Format: python album_extract.py <path to Spotify data> <playlist name>")
+    sys.exit(-1)
+
+data = Path(sys.argv[1], "Playlist1.json")
 output_data = "spotify_albums.csv"
 
 rows = []
 
-for json_file in data_directory.glob("*.json"):
-    try:
-        with open(json_file, "r", encoding="utf-8") as file:
-            data = json.load(file)
+with open(data, encoding="utf-8") as playlist1_file:
+    playlist1_json = json.load(playlist1_file)
 
-    except Exception:
-        continue
+    playlists_full_data = playlist1_json["playlists"]
 
-    if isinstance(data, dict) and "tracks" in data:
-        playlist_name = data.get("name", json_file.stem)
+    playlist_name = sys.argv[2]
 
-        for track in data["tracks"]:
-            rows.append({
-                "playlist": playlist_name,
-                "track": track.get("trackName"),
-                "artist": track.get("artistName"),
-                "album": track.get("albumName")
-            })
+    playlist_data = next((item for item in playlists_full_data if item["name"] == playlist_name), None)
 
-    elif isinstance(data, list):
-        for track in data:
-            if all(i in track for i in ("trackName", "albumName")):
+    if playlist_data:
+        track_count = 0
+
+        for track in playlist_data["items"]:
+            if track["track"]:
+                print(f"Loading track '{track['track']['trackName']}' ...")
+
+                track_album = track["track"]["albumName"]
+                track_artist = track["track"]["artistName"]
+
                 rows.append({
-                    "playlist": "Library",
-                    "track": track.get("trackName"),
-                    "artist": track.get("artistName"),
-                    "album": track.get("albumName")
+                    "album": track_album,
+                    "artist": track_artist
                 })
+
+                track_count += 1
+
+        print(f"\nLoaded {track_count} tracks")
+
+    else:
+        print(f"No playlist found with the name '{playlist_name}'")
 
 with open(output_data, "w", newline="", encoding="utf-8") as file:
     writer = csv.DictWriter(
         file,
-        fieldnames=["playlist", "track", "artist", "album"]
+        fieldnames=["album", "artist"]
     )
 
     writer.writeheader()
