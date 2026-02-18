@@ -6,28 +6,36 @@ from track_entry import TrackEntry
 from constants import Constants
 
 class PlaylistLoader:
-    spotify: spotipy.Spotify
-    scope: str = "playlist-read-private"
-
     def __init__(self):
         self.spotify = spotipy.Spotify(
             auth_manager = SpotifyOAuth(
                 client_id = Constants.CLIENT_ID,
                 client_secret = Constants.CLIENT_SECRET,
-                redirect_uri = Constants.REDIRECT_URI,
-                scope = self.scope
+                redirect_uri = Constants.REDIRECT_URI
             )
         )
 
+        self.limit = 100
+        self.offset = 0
+
+        print(f"Authenticator ID: {self.spotify.current_user()['id']}")
+
     def load(self, playlist_id: str) -> list[TrackEntry]:
-        playlist_item_data = self.spotify.playlist_items(
-            playlist_id,
-            limit = 100
-        )
+        playlist = self.spotify.playlist(playlist_id)
+        print(f"Playlist Owner ID: {playlist['owner']['id']}\n")
 
         tracks: list[TrackEntry] = []
 
-        while playlist_item_data:
+        while True:
+            playlist_item_data = self.spotify.playlist_items(
+                playlist_id = playlist_id,
+                limit = self.limit,
+                offset = self.offset
+            )
+
+            if not playlist_item_data["items"]:
+                break
+
             for item in playlist_item_data["items"]:
                 track = item["track"]
 
@@ -40,9 +48,6 @@ class PlaylistLoader:
                         )
                     )
 
-            if playlist_item_data["next"]:
-                playlist_item_data = self.spotify.next(playlist_item_data)
-            else:
-                playlist_item_data = None
+            self.offset += self.limit
 
         return tracks
