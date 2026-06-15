@@ -206,5 +206,6 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# CSV Data
-*.csv
+# Output Data
+*.txt
+*.spotdl

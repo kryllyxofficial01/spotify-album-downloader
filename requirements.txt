@@ -1,4 +1,2 @@
-spotipy
-python-dotenv
-pandas
-slskd-api
+spotdl
+json
