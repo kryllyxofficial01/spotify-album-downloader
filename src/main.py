@@ -24,18 +24,7 @@ def run_command(command: list[str]) -> None:
     print(f"Running command: {' '.join(command)}")
 
     try:
-        process = subprocess.Popen(
-            command,
-            stdout = subprocess.PIPE,
-            stderr = subprocess.STDOUT,
-            text = True,
-            bufsize = 1
-        )
-
-        for line in process.stdout:
-            print(line, end="")
-
-        process.wait()
+        process = subprocess.run(command, check=False)
 
         if process.returncode != 0:
             print(
@@ -71,7 +60,10 @@ def extract_album_ids(metadata_file) -> list[str]:
     albums = set()
 
     for track in playlist_data:
-        albums.add(track["album_id"])
+        album_id = track.get("album_id")
+
+        if album_id:
+            albums.add(album_id)
 
     return list(albums)
 
@@ -121,7 +113,7 @@ def main():
     for album_id in album_ids:
         spotdl_download_command = [
             "spotdl",
-            "https://open.spotify.com/album/" + album_id,
+            f"https://open.spotify.com/album/{album_id}",
             "--format", SPOTDL_OUTPUT_FORMAT,
             "--output", f"{output_directory}/{SPOTDL_NAMING_SCHEME}",
             "--save-errors", failed_albums_file,
