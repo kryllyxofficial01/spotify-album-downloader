@@ -5,6 +5,7 @@ import string
 import json
 
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 if len(sys.argv) < 3:
     print(
@@ -20,41 +21,26 @@ if len(sys.argv) < 3:
 SPOTDL_OUTPUT_FORMAT = "flac"
 SPOTDL_NAMING_SCHEME = "{album} - {artist}/{track-number} - {title}.{output-ext}"
 
-def run_command(command: list[str]) -> None:
-    print(f"Running command: {' '.join(command)}")
+MAX_CONCURRENT_DOWNLOADS = 3
+
+def run_command(command: list[str]) -> str:
+    target = command[2] if command[1] == "download" else " ".join(command)
 
     try:
-        process = subprocess.run(command, check=False)
+        process = subprocess.run(command, capture_output=True, text=True, check=False)
 
-        if process.returncode != 0:
-            print(
-                f"""
-                  Error running command: {' '.join(command)}
-                """
-            )
+        if process.returncode != 0: return f"failed: {target}"
+        else: return f"success: {target}"
 
-            sys.exit(-1)
+    except Exception:
+        return f"failed: {target}"
 
-    except FileNotFoundError:
-        print(
-            f"""
-                Unable to run command: {' '.join(command)}
-            """
-        )
-
+def extract_album_ids(metadata_filepath: str) -> list[str]:
+    if not Path(metadata_filepath).exists():
+        print(f"Unable to find metadata file: {metadata_filepath}")
         sys.exit(-1)
 
-def extract_album_ids(metadata_file) -> list[str]:
-    if not Path(metadata_file).exists():
-        print(
-            f"""
-                Unable to find metadata file: {metadata_file}
-            """
-        )
-
-        sys.exit(-1)
-
-    with open(metadata_file, "r", encoding="utf-8") as file:
+    with open(metadata_filepath, "r", encoding="utf-8") as file:
         playlist_data = json.load(file)
 
     albums = set()
@@ -67,37 +53,56 @@ def extract_album_ids(metadata_file) -> list[str]:
 
     return list(albums)
 
-def check_failed_albums(failed_albums_file) -> None:
-    failed = Path(failed_albums_file)
+def check_failed_albums(failed_albums_filepath: str) -> None:
+    failed = Path(failed_albums_filepath)
 
     if failed.exists() and failed.stat().st_size > 0:
         with open(failed, "r", encoding="utf-8") as file:
             failed_data = file.readlines()
 
-        print(
-            f"""
-            Download result: {len(failed_data) - 1} tracks failed, see {failed.resolve()}
-            """
-        )
+        print(f"Download result: {len(failed_data) - 1} tracks failed, see {failed.resolve()}")
 
     else:
-        print(
-            """
-            No issues, all files downloaded
-            """
-        )
+       print("No errors, all albums downloaded")
+
+def download_albums(album_ids: list[str], output_directory: str, failed_albums_filepath: str) -> None:
+    commands = []
+
+    for album_id in album_ids:
+        album_url = f"https://open.spotify.com/album/{album_id}"
+
+        spotdl_command = [
+            "spotdl",
+            "download",
+            album_url,
+            "--format", SPOTDL_OUTPUT_FORMAT,
+            "--output", f"{output_directory}/{SPOTDL_NAMING_SCHEME}",
+            "--save-errors", failed_albums_filepath,
+            "--no-user-interface",
+            "--threads", "4"
+        ]
+
+        commands.append(spotdl_command)
+
+    total_albums = len(commands)
+    completed_albums = 0
+
+    with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_DOWNLOADS) as pool:
+        futures = { pool.submit(run_command, command): command for command in commands }
+
+        for future in as_completed(futures):
+            completed_albums += 1
+
+            percentage = int((completed_albums / total_albums) * 100)
+
+            print(f"[{completed_albums}/{total_albums} ~ {percentage}%] {future.result()}")
 
 def main():
     playlist_url = sys.argv[1]
     output_directory = sys.argv[2]
 
     if not Path(output_directory).exists():
-        print(
-            f"""
-                Unable to find output directory: {output_directory}
-            """
-        )
-
+        print(f"Unable to find output directory: {output_directory}")
         sys.exit(-1)
 
     custom_id = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
@@ -105,22 +110,24 @@ def main():
     metadata_file = f"playlist_{custom_id}_metadata.spotdl"
     failed_albums_file = f"failed_{custom_id}.txt"
 
-    spotdl_save_command = ["spotdl", "save", playlist_url, "--save-file", metadata_file]
-    run_command(spotdl_save_command)
+    print("Collecting playlist metadata (this may take a while)...")
+
+    spotdl_save_command = [
+        "spotdl",
+        "save",
+        playlist_url,
+        "--save-file", metadata_file
+    ]
+
+    if subprocess.run(spotdl_save_command).returncode != 0:
+        print("error: could not get playlist metadata")
+        sys.exit(-1)
 
     album_ids = extract_album_ids(metadata_file)
 
-    for album_id in album_ids:
-        spotdl_download_command = [
-            "spotdl",
-            f"https://open.spotify.com/album/{album_id}",
-            "--format", SPOTDL_OUTPUT_FORMAT,
-            "--output", f"{output_directory}/{SPOTDL_NAMING_SCHEME}",
-            "--save-errors", failed_albums_file,
-            "--print-errors"
-        ]
+    print("Downloading albums (this may take a while)...")
 
-        run_command(spotdl_download_command)
+    download_albums(album_ids, output_directory, failed_albums_file)
 
     check_failed_albums(failed_albums_file)
 
