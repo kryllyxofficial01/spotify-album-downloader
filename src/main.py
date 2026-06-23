@@ -29,11 +29,11 @@ def run_command(command: list[str]) -> str:
     try:
         process = subprocess.run(command, capture_output=True, text=True, check=False)
 
-        if process.returncode != 0: return f"failed: {target}"
+        if process.returncode != 0: return f"failed: {target} ({process.stderr or process.stdout})"
         else: return f"success: {target}"
 
-    except Exception:
-        return f"failed: {target}"
+    except Exception as exception:
+        return f"failed: {target} ({exception})"
 
 def extract_album_ids(metadata_filepath: str) -> list[str]:
     if not Path(metadata_filepath).exists():
@@ -78,7 +78,6 @@ def download_albums(album_ids: list[str], output_directory: str, failed_albums_f
             "--format", SPOTDL_OUTPUT_FORMAT,
             "--output", f"{output_directory}/{SPOTDL_NAMING_SCHEME}",
             "--save-errors", failed_albums_filepath,
-            "--no-user-interface",
             "--threads", "4"
         ]
 
@@ -116,7 +115,8 @@ def main():
         "spotdl",
         "save",
         playlist_url,
-        "--save-file", metadata_file
+        "--save-file", metadata_file,
+        "--log-level", "DEBUG"
     ]
 
     if subprocess.run(spotdl_save_command).returncode != 0:
