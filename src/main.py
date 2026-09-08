@@ -1,135 +1,116 @@
-import subprocess
-import sys
-import random
-import string
-import json
+import os
+import asyncio
+from dotenv import load_dotenv
 
-from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
+load_dotenv()
 
-if len(sys.argv) < 3:
-    print(
-        f"""
-        Insufficient arguments.
+# Ensure registry environment variable is set
+REGISTRY_URL = "https://raw.githubusercontent.com/spotiflacapp/SpotiFLAC-Extension/main/registry.json"
+os.environ["SPOTIFLAC_REGISTRIES"] = os.getenv("SPOTIFLAC_REGISTRIES", REGISTRY_URL)
 
-        Usage: {sys.argv[0]} <public Spotify playlist url> <path to destination>
-        """
+import spotipy
+from spotipy.oauth2 import SpotifyOAuth
+from SpotiFLAC import SpotiFLAC
+from SpotiFLAC.extensions import ExtensionManager
+
+# Auto-install/sync extensions on launch
+def ensure_extensions():
+    mgr = ExtensionManager()
+    try:
+        installed_exts = mgr.list_installed()
+    except Exception:
+        installed_exts = []
+
+    installed_ids = {
+        ext.id if hasattr(ext, 'id') else ext.get('id') if isinstance(ext, dict) else str(ext)
+        for ext in installed_exts
+    } if installed_exts else set()
+
+    required = ["spotify-web", "tidal-web", "qobuz-web", "deezer", "amazon"]
+    missing = [ext for ext in required if ext not in installed_ids]
+
+    if missing:
+        print(f"Installing missing extensions: {missing}...")
+        mgr.fetch_registry()
+        for ext in missing:
+            try:
+                mgr.install(ext)
+                print(f"Successfully installed {ext}")
+            except Exception as e:
+                print(f"Failed to install {ext}: {e}")
+
+ensure_extensions()
+
+CLIENT_ID = os.getenv("CLIENT_ID")
+CLIENT_SECRET = os.getenv("CLIENT_SECRET")
+REDIRECT_URI = os.getenv("REDIRECT_URI")
+
+sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
+    client_id=CLIENT_ID,
+    client_secret=CLIENT_SECRET,
+    redirect_uri=REDIRECT_URI,
+    scope="playlist-read-private playlist-read-collaborative"
+))
+
+playlist_id = "2MZnjwbVsu63BJDwwVTYQk"
+output_directory = r"M:\JellyfinContent\Music (media-sync)"
+
+results = sp.playlist_items(playlist_id)
+album_urls = set()
+
+while results:
+    if isinstance(results, dict) and 'items' in results:
+        entries = results['items']
+        if isinstance(entries, dict) and 'items' in entries:
+            entries = entries['items']
+    else:
+        entries = []
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+
+        track = entry.get('item') or entry.get('track')
+        if track and isinstance(track, dict):
+            album = track.get('album')
+            if album and 'external_urls' in album:
+                album_url = album['external_urls'].get('spotify')
+                if album_url:
+                    album_urls.add(album_url)
+
+    if isinstance(results, dict) and results.get('next'):
+        results = sp.next(results)
+    else:
+        results = None
+
+print(f"\nFound {len(album_urls)} unique albums across the playlist.\n")
+
+def process_album(album_url):
+    SpotiFLAC(
+        url=album_url,
+        output_dir=output_directory,
+        services=["deezer", "qobuz-web", "amazon", "tidal-web"],
+        filename_format="{album}/{track} - {title}"
     )
 
-    sys.exit(-1)
+async def main():
+    album_list = list(album_urls)
+    failed_albums = []
+    loop = asyncio.get_running_loop()
 
-SPOTDL_OUTPUT_FORMAT = "flac"
-SPOTDL_NAMING_SCHEME = "{album} - {artist}/{track-number} - {title}.{output-ext}"
+    for i, album_url in enumerate(album_list, start=1):
+        print(f"[{i}/{len(album_list)}] Processing album: {album_url}")
+        try:
+            await loop.run_in_executor(None, process_album, album_url)
+        except Exception as e:
+            print(f"[ERROR] Failed to process {album_url}: {e}")
+            failed_albums.append(album_url)
 
-MAX_CONCURRENT_DOWNLOADS = 3
-
-def run_command(command: list[str]) -> str:
-    target = command[2] if command[1] == "download" else " ".join(command)
-
-    try:
-        process = subprocess.run(command, capture_output=True, text=True, check=False)
-
-        if process.returncode != 0: return f"failed: {target} ({process.stderr or process.stdout})"
-        else: return f"success: {target}"
-
-    except Exception as exception:
-        return f"failed: {target} ({exception})"
-
-def extract_album_ids(metadata_filepath: str) -> list[str]:
-    if not Path(metadata_filepath).exists():
-        print(f"Unable to find metadata file: {metadata_filepath}")
-        sys.exit(-1)
-
-    with open(metadata_filepath, "r", encoding="utf-8") as file:
-        playlist_data = json.load(file)
-
-    albums = set()
-
-    for track in playlist_data:
-        album_id = track.get("album_id")
-
-        if album_id:
-            albums.add(album_id)
-
-    return list(albums)
-
-def check_failed_albums(failed_albums_filepath: str) -> None:
-    failed = Path(failed_albums_filepath)
-
-    if failed.exists() and failed.stat().st_size > 0:
-        with open(failed, "r", encoding="utf-8") as file:
-            failed_data = file.readlines()
-
-        print(f"Download result: {len(failed_data) - 1} tracks failed, see {failed.resolve()}")
-
-    else:
-       print("No errors, all albums downloaded")
-
-def download_albums(album_ids: list[str], output_directory: str, failed_albums_filepath: str) -> None:
-    commands = []
-
-    for album_id in album_ids:
-        album_url = f"https://open.spotify.com/album/{album_id}"
-
-        spotdl_command = [
-            "spotdl",
-            "download",
-            album_url,
-            "--format", SPOTDL_OUTPUT_FORMAT,
-            "--output", f"{output_directory}/{SPOTDL_NAMING_SCHEME}",
-            "--save-errors", failed_albums_filepath,
-            "--threads", "4"
-        ]
-
-        commands.append(spotdl_command)
-
-    total_albums = len(commands)
-    completed_albums = 0
-
-    with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_DOWNLOADS) as pool:
-        futures = { pool.submit(run_command, command): command for command in commands }
-
-        for future in as_completed(futures):
-            completed_albums += 1
-
-            percentage = int((completed_albums / total_albums) * 100)
-
-            print(f"[{completed_albums}/{total_albums} ~ {percentage}%] {future.result()}")
-
-def main():
-    playlist_url = sys.argv[1]
-    output_directory = sys.argv[2]
-
-    if not Path(output_directory).exists():
-        print(f"Unable to find output directory: {output_directory}")
-        sys.exit(-1)
-
-    custom_id = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
-
-    metadata_file = f"playlist_{custom_id}_metadata.spotdl"
-    failed_albums_file = f"failed_{custom_id}.txt"
-
-    print("Collecting playlist metadata (this may take a while)...")
-
-    spotdl_save_command = [
-        "spotdl",
-        "save",
-        playlist_url,
-        "--save-file", metadata_file,
-        "--log-level", "DEBUG"
-    ]
-
-    if subprocess.run(spotdl_save_command).returncode != 0:
-        print("error: could not get playlist metadata")
-        sys.exit(-1)
-
-    album_ids = extract_album_ids(metadata_file)
-
-    print("Downloading albums (this may take a while)...")
-
-    download_albums(album_ids, output_directory, failed_albums_file)
-
-    check_failed_albums(failed_albums_file)
+    if failed_albums:
+        with open("failed_downloads.txt", "w", encoding="utf-8") as f:
+            for url in failed_albums:
+                f.write(f"{url}\n")
+        print(f"\nSaved {len(failed_albums)} failed album URLs to failed_downloads.txt")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

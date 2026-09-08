@@ -1,1 +1,3 @@
-spotdl
+python-dotenv
+spotipy
+SpotiFLAC
