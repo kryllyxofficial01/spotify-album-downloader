@@ -1,10 +1,12 @@
-import os
+import os, sys
 import asyncio
 from dotenv import load_dotenv
 
+if len(sys.argv) < 2:
+    print("Missing playlist ID")
+
 load_dotenv()
 
-# Ensure registry environment variable is set
 REGISTRY_URL = "https://raw.githubusercontent.com/spotiflacapp/SpotiFLAC-Extension/main/registry.json"
 os.environ["SPOTIFLAC_REGISTRIES"] = os.getenv("SPOTIFLAC_REGISTRIES", REGISTRY_URL)
 
@@ -13,31 +15,32 @@ from spotipy.oauth2 import SpotifyOAuth
 from SpotiFLAC import SpotiFLAC
 from SpotiFLAC.extensions import ExtensionManager
 
-# Auto-install/sync extensions on launch
 def ensure_extensions():
-    mgr = ExtensionManager()
-    try:
-        installed_exts = mgr.list_installed()
-    except Exception:
-        installed_exts = []
+    extension_manager = ExtensionManager()
+
+    try: installed = extension_manager.list_installed()
+    except Exception: installed = []
 
     installed_ids = {
-        ext.id if hasattr(ext, 'id') else ext.get('id') if isinstance(ext, dict) else str(ext)
-        for ext in installed_exts
-    } if installed_exts else set()
+        extension.id if hasattr(extension, 'id') else extension.get('id') if isinstance(extension, dict) else str(extension) for extension in installed
+    } if installed else set()
 
     required = ["spotify-web", "tidal-web", "qobuz-web", "deezer", "amazon"]
-    missing = [ext for ext in required if ext not in installed_ids]
+    missing = [extension for extension in required if extension not in installed_ids]
 
     if missing:
         print(f"Installing missing extensions: {missing}...")
-        mgr.fetch_registry()
-        for ext in missing:
+
+        extension_manager.fetch_registry()
+
+        for extension in missing:
             try:
-                mgr.install(ext)
-                print(f"Successfully installed {ext}")
+                extension_manager.install(extension)
+
+                print(f"Successfully installed {extension}")
+
             except Exception as e:
-                print(f"Failed to install {ext}: {e}")
+                print(f"Failed to install {extension}: {e}")
 
 ensure_extensions()
 
@@ -52,8 +55,8 @@ sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
     scope="playlist-read-private playlist-read-collaborative"
 ))
 
-playlist_id = "2MZnjwbVsu63BJDwwVTYQk"
-output_directory = r"M:\JellyfinContent\Music (media-sync)"
+playlist_id = sys.argv[1]
+output_directory = "M:\\JellyfinContent\\Music (media-sync)"
 
 results = sp.playlist_items(playlist_id)
 album_urls = set()
@@ -73,15 +76,15 @@ while results:
         track = entry.get('item') or entry.get('track')
         if track and isinstance(track, dict):
             album = track.get('album')
+
             if album and 'external_urls' in album:
                 album_url = album['external_urls'].get('spotify')
+
                 if album_url:
                     album_urls.add(album_url)
 
-    if isinstance(results, dict) and results.get('next'):
-        results = sp.next(results)
-    else:
-        results = None
+    if isinstance(results, dict) and results.get('next'): results = sp.next(results)
+    else: results = None
 
 print(f"\nFound {len(album_urls)} unique albums across the playlist.\n")
 
