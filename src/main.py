@@ -93,7 +93,7 @@ def process_album(album_url):
         url=album_url,
         output_dir=output_directory,
         services=["deezer", "qobuz-web", "amazon", "tidal-web"],
-        filename_format="{album}/{track} - {title}"
+        filename_format="{album} - {artist}/{track} - {title}"
     )
 
 async def main():
