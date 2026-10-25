@@ -60,7 +60,7 @@ CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REDIRECT_URI = os.getenv("REDIRECT_URI")
 
-sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
+spotify = spotipy.Spotify(auth_manager=SpotifyOAuth(
     client_id = CLIENT_ID,
     client_secret = CLIENT_SECRET,
     redirect_uri = REDIRECT_URI,
@@ -70,7 +70,7 @@ sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
 playlist_id = sys.argv[1]
 output_directory = sys.argv[2]
 
-results = sp.playlist_items(playlist_id)
+results = spotify.playlist_items(playlist_id)
 
 album_urls = set()
 
@@ -96,7 +96,7 @@ while results:
                     album_urls.add(album_url)
 
     if isinstance(results, dict) and results.get('next'):
-        results = sp.next(results)
+        results = spotify.next(results)
     else:
         results = None
 
@@ -143,12 +143,13 @@ async def main():
         for i, retry_url in enumerate(list(failed_urls), start=1):
             print(f"[Retry {i}/{len(failed_urls)}] Attempting: {retry_url}")
 
-            success, _ = await loop.run_in_executor(None, process_target, retry_url)
+            success = await loop.run_in_executor(None, process_target, retry_url)
 
             if not success:
                 still_failed.add(retry_url)
 
                 print(f"[FAILED AGAIN] Could not fetch: {retry_url}")
+
             else:
                 print(f"[RECOVERED] Successfully downloaded: {retry_url}")
 
